@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAdvisors } from '../state/AdvisorsContext'
 
 function DataMapper() {
@@ -9,6 +9,15 @@ function DataMapper() {
   const [maxTokens, setMaxTokens] = useState<number>(512)
 
   const { advisors } = useAdvisors()
+  const advisorsByName = useMemo(() => {
+    return [...advisors].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+  }, [advisors])
+
+  useEffect(() => {
+    if (!selectedAdvisorId && advisorsByName.length > 0) {
+      setSelectedAdvisorId(advisorsByName[0].id)
+    }
+  }, [selectedAdvisorId, advisorsByName])
 
   return (
     <div className="stack">
@@ -20,9 +29,11 @@ function DataMapper() {
             <div className="field">
               <label htmlFor="advisor">Advisor</label>
               <select id="advisor" value={selectedAdvisorId} onChange={e => setSelectedAdvisorId(e.target.value)}>
-                <option value="">Select an advisor</option>
-                {advisors.map(a => (
-                  <option key={a.id} value={a.id}>{a.name || '(no name)'}{a.title ? ` — ${a.title}` : ''}</option>
+                {advisorsByName.length === 0 ? (
+                  <option value="" disabled>No advisors yet</option>
+                ) : null}
+                {advisorsByName.map(a => (
+                  <option key={a.id} value={a.id}>{a.name || '(no name)'}</option>
                 ))}
               </select>
             </div>
