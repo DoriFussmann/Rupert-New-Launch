@@ -4,11 +4,14 @@ import { BrowserRouter } from 'react-router-dom'
 import '@fontsource/inter/400.css'
 import './index.css'
 import App from './App.tsx'
+import { AdvisorsProvider } from './state/AdvisorsContext'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+      <AdvisorsProvider>
+        <App />
+      </AdvisorsProvider>
     </BrowserRouter>
   </StrictMode>,
 )
