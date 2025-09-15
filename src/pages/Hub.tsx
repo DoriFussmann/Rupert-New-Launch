@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import Button from '../components/Button'
-import { Advisor, useAdvisors } from '../state/AdvisorsContext'
+import type { Advisor } from '../state/AdvisorsContext'
+import { useAdvisors } from '../state/AdvisorsContext'
 
 function Hub() {
   const { advisors, upsertAdvisor, deleteAdvisor } = useAdvisors()
