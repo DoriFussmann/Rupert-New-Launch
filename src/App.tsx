@@ -11,6 +11,7 @@ function App() {
         <Route index element={<Home />} />
         <Route path="/hub" element={<Hub />} />
         <Route path="/data-mapper" element={<DataMapper />} />
+        <Route path="*" element={<Home />} />
       </Route>
     </Routes>
   )
