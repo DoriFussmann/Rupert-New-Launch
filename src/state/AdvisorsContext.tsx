@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
 export type Advisor = {
   id: string
@@ -21,7 +21,23 @@ type AdvisorsContextValue = {
 const AdvisorsContext = createContext<AdvisorsContextValue | null>(null)
 
 export function AdvisorsProvider({ children }: { children: React.ReactNode }) {
-  const [advisors, setAdvisors] = useState<Advisor[]>([])
+  const [advisors, setAdvisors] = useState<Advisor[]>(() => {
+    try {
+      const raw = localStorage.getItem('advisors')
+      if (!raw) return []
+      const parsed = JSON.parse(raw) as Advisor[]
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
+
+  // Persist to localStorage on every change
+  useEffect(() => {
+    try {
+      localStorage.setItem('advisors', JSON.stringify(advisors))
+    } catch {}
+  }, [advisors])
 
   const value = useMemo<AdvisorsContextValue>(() => ({
     advisors,

@@ -5,12 +5,21 @@ import '@fontsource/inter/400.css'
 import './index.css'
 import App from './App.tsx'
 import { AdvisorsProvider } from './state/AdvisorsContext'
+import { StructuresProvider } from './state/StructuresContext'
+import { TasksProvider } from './state/TasksContext'
+import { CompaniesProvider } from './state/CompaniesContext'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <AdvisorsProvider>
-        <App />
+        <StructuresProvider>
+          <TasksProvider>
+            <CompaniesProvider>
+              <App />
+            </CompaniesProvider>
+          </TasksProvider>
+        </StructuresProvider>
       </AdvisorsProvider>
     </BrowserRouter>
   </StrictMode>,
