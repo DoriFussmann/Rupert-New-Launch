@@ -20,7 +20,12 @@ function DataMapper() {
   const [preparedPayload, setPreparedPayload] = useState<any>(null)
   const [apiCallStatus, setApiCallStatus] = useState<'idle' | 'working' | 'error' | 'success'>('idle')
   const [apiOutput, setApiOutput] = useState<any>(null)
+  const [dataMap, setDataMap] = useState<any>(null)
+  const [cleanOpen, setCleanOpen] = useState(false)
+  const [dataMapOpen, setDataMapOpen] = useState(false)
   const [rawOpen, setRawOpen] = useState(false)
+  const [testOpen, setTestOpen] = useState(false)
+  const [testLog, setTestLog] = useState<string>('')
   // Separate API Chat controls state
   const [chatTaskId, setChatTaskId] = useState<string>('')
   const [chatModel, setChatModel] = useState<string>('gpt-4o-mini')
@@ -75,18 +80,17 @@ function DataMapper() {
   async function handleApiTest() {
     try {
       setApiStatus('working')
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
-      if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY')
-      const res = await fetch('https://api.openai.com/v1/models', {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-      })
+      const res = await fetch('/api/openai/test', { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setApiStatus('success')
       setTimeout(() => setApiStatus('idle'), 1000)
     } catch (e) {
       setApiStatus('error')
+      try {
+        const msg = e instanceof Error ? e.message : String(e)
+        setTestLog(`API Test failed: ${msg}`)
+        setTestOpen(true)
+      } catch {}
       setTimeout(() => setApiStatus('idle'), 1500)
     }
   }
@@ -145,6 +149,7 @@ function DataMapper() {
 
   function handleApiPrepare() {
     const { variableName, payload: compiledBlocks } = buildCompiledBlocks()
+    const sanitized = sanitizeForApi(compiledBlocks)
     ;(window as any)[variableName] = compiledBlocks
     const payload = {
       model,
@@ -153,7 +158,7 @@ function DataMapper() {
       messages: [
         {
           role: 'user',
-          content: JSON.stringify(compiledBlocks),
+          content: JSON.stringify(sanitized),
         },
       ],
     }
@@ -166,27 +171,40 @@ function DataMapper() {
       setApiCallStatus('working')
       // Build the same payload as API Prepare
       const { variableName, payload: compiledBlocks } = buildCompiledBlocks()
+      const sanitized = sanitizeForApi(compiledBlocks)
       ;(window as any)[variableName] = compiledBlocks
       const body = {
         model,
         temperature,
         max_tokens: maxTokens,
         messages: [
-          { role: 'user', content: JSON.stringify(compiledBlocks) },
+          { role: 'user', content: JSON.stringify(sanitized) },
         ],
       }
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
-      if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY')
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-      })
+      const res = await fetch('/api/openai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' })
       const json = await res.json()
       setApiOutput(json)
+      // Try to parse model content to strict object; fallback to full response
+      let parsed: any = json
+      const content = json?.choices?.[0]?.message?.content
+      if (typeof content === 'string') {
+        try {
+          parsed = JSON.parse(content)
+        } catch {
+          const start = content.indexOf('{')
+          const end = content.lastIndexOf('}')
+          if (start >= 0 && end > start) {
+            const slice = content.slice(start, end + 1)
+            try { parsed = JSON.parse(slice) } catch {}
+          }
+        }
+      }
+      // Save initial or merge subsequent into server DataMap.json
+      await fetch('/api/datamap', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed), cache: 'no-store' })
+      // Refresh local view
+      const dmRes = await fetch('/api/datamap', { cache: 'no-store' })
+      const dm = await dmRes.json()
+      setDataMap(dm)
       setApiCallStatus(res.ok ? 'success' : 'error')
     } catch (e) {
       setApiCallStatus('error')
@@ -208,31 +226,27 @@ function DataMapper() {
     companiesByName,
   ])
 
-  // Parse API output into topics/subtopics/summaries for display
+  // Load DataMap on mount and whenever we might need refresh
+  useEffect(() => {
+    (async () => {
+      try {
+        const dmRes = await fetch('/api/datamap', { cache: 'no-store' })
+        const dm = await dmRes.json()
+        setDataMap(dm)
+      } catch {}
+    })()
+  }, [])
+
+  // Parse DataMap into topics/subtopics/summaries for display
   const parsedSummaries = useMemo(() => {
     try {
-      if (!apiOutput) return null
-      // If OpenAI chat completion
-      const content = apiOutput?.choices?.[0]?.message?.content
-      if (typeof content === 'string') {
-        try {
-          return JSON.parse(content)
-        } catch {
-          const start = content.indexOf('{')
-          const end = content.lastIndexOf('}')
-          if (start >= 0 && end > start) {
-            const slice = content.slice(start, end + 1)
-            return JSON.parse(slice)
-          }
-        }
-      }
-      // If already an object with topics
-      if (apiOutput?.topics) return apiOutput
+      if (!dataMap) return null
+      if (dataMap?.topics) return dataMap
       return null
     } catch {
       return null
     }
-  }, [apiOutput])
+  }, [dataMap])
 
   const normalized = useMemo(() => {
     if (!parsedSummaries) return null
@@ -257,6 +271,39 @@ function DataMapper() {
     return { topics, globalUnanswered }
   }, [parsedSummaries])
 
+  // Remove markdown/HTML wrappers but preserve JSON schema inside Task blocks exactly
+  function sanitizeForApi(blocks: any[]) {
+    return blocks.map((b) => {
+      if (!b || !b.title) return b
+      // Only clean non-Task blocks or Task content that isn't a JSON object/string schema
+      if (String(b.title).toLowerCase() === 'task') {
+        return b
+      }
+      const clone = { ...b }
+      if (clone.content && typeof clone.content === 'string') {
+        clone.content = stripFormattingWrappers(clone.content)
+      } else if (clone.content && typeof clone.content === 'object') {
+        // For objects, shallowly clean string fields
+        clone.content = Object.fromEntries(Object.entries(clone.content).map(([k, v]) => [k, typeof v === 'string' ? stripFormattingWrappers(v) : v]))
+      }
+      return clone
+    })
+  }
+
+  function stripFormattingWrappers(input: string): string {
+    let out = input
+    // Remove ``` code fences and ```json fences
+    out = out.replace(/```[a-zA-Z]*\n([\s\S]*?)```/g, '$1')
+    // Remove bold/italic markers **text**, __text__, *text*, _text_
+    out = out.replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1')
+    out = out.replace(/\*(.*?)\*/g, '$1').replace(/_(.*?)_/g, '$1')
+    // Remove markdown headings like ### Title / ## Title / # Title (keep text)
+    out = out.replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    // Strip basic HTML tags but keep inner text
+    out = out.replace(/<[^>]+>/g, '')
+    return out.trim()
+  }
+
   async function handleCopyPrepared() {
     try {
       const text = JSON.stringify(preparedPayload ?? {}, null, 2)
@@ -266,7 +313,7 @@ function DataMapper() {
 
   async function handleCopyRaw() {
     try {
-      const text = apiOutput ? JSON.stringify(apiOutput, null, 2) : ''
+      const text = dataMap ? JSON.stringify(dataMap, null, 2) : ''
       await navigator.clipboard.writeText(text)
     } catch {}
   }
@@ -275,6 +322,12 @@ function DataMapper() {
     try {
       const text = normalized ? JSON.stringify(normalized, null, 2) : ''
       await navigator.clipboard.writeText(text)
+    } catch {}
+  }
+
+  async function handleCopyTestLog() {
+    try {
+      await navigator.clipboard.writeText(testLog)
     } catch {}
   }
 
@@ -431,8 +484,10 @@ function DataMapper() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 400 }}>Outputs</h2>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={handleCopyClean} disabled={!normalized}>Copy Clean</button>
+              <button className="btn" onClick={() => setCleanOpen(true)} disabled={!normalized}>Show Clean</button>
+              <button className="btn" onClick={() => setDataMapOpen(true)} disabled={!dataMap}>Data Map</button>
               <button className="btn" onClick={() => setRawOpen(true)} disabled={!apiOutput}>Show Raw</button>
+              <button className="btn" onClick={async () => { await fetch('/api/datamap', { method: 'DELETE' }); const dmRes = await fetch('/api/datamap', { cache: 'no-store' }); const dm = await dmRes.json(); setDataMap(dm) }}>Reset</button>
             </div>
           </div>
           {apiCallStatus === 'working' && (
@@ -481,9 +536,9 @@ function DataMapper() {
               )}
             </div>
           ) : (
-            apiOutput ? (
+            dataMap ? (
               <pre style={{ margin: 0, fontSize: 12, lineHeight: '18px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-{JSON.stringify(apiOutput, null, 2)}
+{JSON.stringify(dataMap, null, 2)}
               </pre>
             ) : (
               <p style={{ margin: 0, fontSize: 14 }}>No API output yet.</p>
@@ -539,6 +594,55 @@ function DataMapper() {
             <pre style={{ margin: 0, fontSize: 12, lineHeight: '18px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
 {apiOutput ? JSON.stringify(apiOutput, null, 2) : ''}
             </pre>
+          </div>
+        </div>
+      )}
+
+      {cleanOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div className="box" style={{ maxWidth: 840, width: '100%', maxHeight: '80vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 400 }}>Clean Output</h3>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={handleCopyClean} disabled={!normalized}>Copy</button>
+                <button className="btn" onClick={() => setCleanOpen(false)}>Close</button>
+              </div>
+            </div>
+            <pre style={{ margin: 0, fontSize: 12, lineHeight: '18px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+{normalized ? JSON.stringify(normalized, null, 2) : ''}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {dataMapOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div className="box" style={{ maxWidth: 840, width: '100%', maxHeight: '80vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 400 }}>Data Map</h3>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={async () => { try { const text = dataMap ? JSON.stringify(dataMap, null, 2) : ''; await navigator.clipboard.writeText(text) } catch {} }} disabled={!dataMap}>Copy</button>
+                <button className="btn" onClick={() => setDataMapOpen(false)}>Close</button>
+              </div>
+            </div>
+            <pre style={{ margin: 0, fontSize: 12, lineHeight: '18px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+{dataMap ? JSON.stringify(dataMap, null, 2) : ''}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {testOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div className="box" style={{ maxWidth: 720, width: '100%', maxHeight: '70vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 400 }}>API Test Debug Log</h3>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={handleCopyTestLog}>Copy</button>
+                <button className="btn" onClick={() => setTestOpen(false)}>Close</button>
+              </div>
+            </div>
+            <pre style={{ margin: 0, fontSize: 12, lineHeight: '18px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{testLog}</pre>
           </div>
         </div>
       )}

@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "structureVersion": "v1.0",
+    "generatedAt": "2025-09-17T01:14:47.265Z"
+  },
+  "global": {
+    "answeredCountTotal": 0,
+    "totalQuestionsAll": 0,
+    "totalCompletion": 0,
+    "unanswered": []
+  },
+  "topics": []
+}

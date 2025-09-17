@@ -1,0 +1,6 @@
+{
+  "/api/datamap/route": "app/api/datamap/route.js",
+  "/api/openai/chat/route": "app/api/openai/chat/route.js",
+  "/page": "app/page.js",
+  "/data-mapper/page": "app/data-mapper/page.js"
+}

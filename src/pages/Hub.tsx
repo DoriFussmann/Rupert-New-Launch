@@ -2,17 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import Button from '../components/Button'
 import type { Advisor } from '../state/AdvisorsContext'
 import { useAdvisors } from '../state/AdvisorsContext'
-import { useStructures } from '../state/StructuresContext'
 import { useTasks } from '../state/TasksContext'
 import { useCompanies } from '../state/CompaniesContext'
 
 function Hub() {
   const { advisors, upsertAdvisor, deleteAdvisor } = useAdvisors()
-  const { structures, upsertStructure, deleteStructure } = useStructures()
   const { tasks, upsertTask, deleteTask } = useTasks()
   const { companies, upsertCompany, deleteCompany } = useCompanies()
   const [editing, setEditing] = useState<Advisor | null>(null)
-  const [editingStructure, setEditingStructure] = useState<ReturnType<typeof createEmptyStructure> | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [editingTask, setEditingTask] = useState<{ id: string, name: string, details: string } | null>(null)
   const companyFileRef = useRef<HTMLInputElement | null>(null)
@@ -36,16 +33,6 @@ function Hub() {
 
   const onSave = (advisor: Advisor) => { upsertAdvisor(advisor); setEditing(null) }
 
-  // Structures helpers
-  const onAddStructure = () => setEditingStructure(createEmptyStructure())
-  const onEditStructure = (id: string) => {
-    const s = structures.find(x => x.id === id)
-    if (s) setEditingStructure(JSON.parse(JSON.stringify(s)))
-  }
-  const onDeleteStructure = (id: string) => deleteStructure(id)
-  const onSaveStructure = (s: ReturnType<typeof createEmptyStructure>) => {
-    upsertStructure(s); setEditingStructure(null)
-  }
 
   // Tasks helpers
   const onAddTask = () => setEditingTask({ id: crypto.randomUUID(), name: '', details: '' })
@@ -110,42 +97,6 @@ function Hub() {
         </section>
       )}
 
-      <section className="stack" style={{ borderTop: '1px solid #f2f2f2', paddingTop: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 400 }}>Structures</h2>
-          <Button label="Add Structure" onClick={onAddStructure} />
-        </div>
-        {structures.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 14 }}>No structures yet.</p>
-        ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {structures.map(s => (
-              <li key={s.id} onClick={() => onEditStructure(s.id)} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', borderTop: '1px solid #f2f2f2', cursor: 'pointer' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14 }}>{s.name || '(no name)'}</div>
-                  <div style={{ fontSize: 12, color: '#525252' }}>{s.topics.length} topics</div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }} onClick={(e) => e.stopPropagation()}>
-                  <Button label="Edit" onClick={() => onEditStructure(s.id)} />
-                  <Button label="Delete" onClick={() => onDeleteStructure(s.id)} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {editingStructure && (
-        <section className="stack box" style={{ marginTop: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 400 }}>Structure Details</h3>
-          <StructureForm
-            value={editingStructure}
-            onChange={setEditingStructure}
-            onCancel={() => setEditingStructure(null)}
-            onSave={() => onSaveStructure(editingStructure)}
-          />
-        </section>
-      )}
 
       <section className="stack" style={{ borderTop: '1px solid #f2f2f2', paddingTop: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -329,191 +280,6 @@ function readFileAsDataUrl(file: File) {
 }
 
 export default Hub
-
-// -------- Structures UI --------
-type StructureDraft = ReturnType<typeof createEmptyStructure>
-
-function createEmptyStructure() {
-  return { id: crypto.randomUUID(), name: '', topics: [] as Array<{ id: string, name: string, subtopics: Array<{ id: string, name: string, keyQuestions: string[] }> }> }
-}
-
-function StructureForm({ value, onChange, onCancel, onSave }: {
-  value: StructureDraft
-  onChange: (s: StructureDraft) => void
-  onCancel: () => void
-  onSave: () => void
-}) {
-  const update = (next: Partial<StructureDraft>) => onChange({ ...value, ...next })
-
-  const addTopic = () => update({ topics: [...value.topics, { id: crypto.randomUUID(), name: '', subtopics: [] }] })
-  const updateTopic = (id: string, patch: Partial<StructureDraft['topics'][number]>) => update({ topics: value.topics.map(t => t.id === id ? { ...t, ...patch } : t) })
-  const removeTopic = (id: string) => update({ topics: value.topics.filter(t => t.id !== id) })
-
-  const addSubtopic = (topicId: string) => updateTopic(topicId, { subtopics: [...value.topics.find(t => t.id === topicId)!.subtopics, { id: crypto.randomUUID(), name: '', keyQuestions: [] }] })
-  const updateSubtopic = (topicId: string, subId: string, patch: Partial<StructureDraft['topics'][number]['subtopics'][number]>) => updateTopic(topicId, { subtopics: value.topics.find(t => t.id === topicId)!.subtopics.map(s => s.id === subId ? { ...s, ...patch } : s) })
-  const removeSubtopic = (topicId: string, subId: string) => updateTopic(topicId, { subtopics: value.topics.find(t => t.id === topicId)!.subtopics.filter(s => s.id !== subId) })
-
-  const addQuestion = (topicId: string, subId: string) => {
-    const topic = value.topics.find(t => t.id === topicId)!
-    const sub = topic.subtopics.find(s => s.id === subId)!
-    updateSubtopic(topicId, subId, { keyQuestions: [...sub.keyQuestions, ''] })
-  }
-  const updateQuestion = (topicId: string, subId: string, idx: number, text: string) => {
-    const topic = value.topics.find(t => t.id === topicId)!
-    const sub = topic.subtopics.find(s => s.id === subId)!
-    const next = [...sub.keyQuestions]
-    next[idx] = text
-    updateSubtopic(topicId, subId, { keyQuestions: next })
-  }
-  const removeQuestion = (topicId: string, subId: string, idx: number) => {
-    const topic = value.topics.find(t => t.id === topicId)!
-    const sub = topic.subtopics.find(s => s.id === subId)!
-    const next = sub.keyQuestions.filter((_, i) => i !== idx)
-    updateSubtopic(topicId, subId, { keyQuestions: next })
-  }
-
-  // Selection state for 3-column layout
-  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(value.topics[0]?.id ?? null)
-  const selectedTopic = selectedTopicId ? value.topics.find(t => t.id === selectedTopicId) ?? null : null
-  const [selectedSubId, setSelectedSubId] = useState<string | null>(selectedTopic?.subtopics[0]?.id ?? null)
-  const selectedSub = selectedTopic && selectedSubId ? selectedTopic.subtopics.find(s => s.id === selectedSubId) ?? null : null
-
-  // Keep selections valid as data changes
-  useEffect(() => {
-    if (!value.topics.some(t => t.id === selectedTopicId!)) {
-      setSelectedTopicId(value.topics[0]?.id ?? null)
-    }
-  }, [value.topics, selectedTopicId])
-  useEffect(() => {
-    if (!selectedTopic) {
-      setSelectedSubId(null)
-      return
-    }
-    if (!selectedTopic.subtopics.some(s => s.id === selectedSubId!)) {
-      setSelectedSubId(selectedTopic.subtopics[0]?.id ?? null)
-    }
-  }, [selectedTopic, selectedSubId])
-
-  return (
-    <div className="stack">
-      <div className="field">
-        <label htmlFor="s-name">Name</label>
-        <input id="s-name" type="text" value={value.name} onChange={e => update({ name: e.target.value })} />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
-        {/* Topics (left) */}
-        <div className="stack">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <h4 style={{ margin: 0, fontSize: 14, fontWeight: 400 }}>Topics</h4>
-            <AddTopicInline onAdd={(topicName, subtopicsLines) => {
-              const newId = crypto.randomUUID()
-              const subs = subtopicsLines
-                .split('\n')
-                .map(s => s.trim())
-                .filter(Boolean)
-                .map(line => ({ id: crypto.randomUUID(), name: line, keyQuestions: [] as string[] }))
-              update({ topics: [...value.topics, { id: newId, name: topicName, subtopics: subs }] })
-              setSelectedTopicId(newId)
-              setSelectedSubId(subs[0]?.id ?? null)
-            }} />
-          </div>
-          {value.topics.length === 0 ? (
-            <p style={{ margin: 0, fontSize: 14 }}>No topics yet.</p>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {value.topics.map(topic => (
-                <li key={topic.id}
-                    onClick={() => { setSelectedTopicId(topic.id); setSelectedSubId(value.topics.find(t => t.id === topic.id)!.subtopics[0]?.id ?? null) }}
-                    style={{ padding: '8px', borderTop: '1px solid #f2f2f2', cursor: 'pointer', background: topic.id === selectedTopicId ? '#f9f9f9' : 'transparent', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 14 }}>{topic.name || '(no name)'}</span>
-                  <div onClick={(e) => e.stopPropagation()}>
-                    <Button label="Remove" onClick={() => removeTopic(topic.id)} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* Subtopics (middle) */}
-        <div className="stack">
-          <h4 style={{ margin: 0, fontSize: 14, fontWeight: 400 }}>Subtopics</h4>
-          {!selectedTopic ? (
-            <p style={{ margin: 0, fontSize: 14 }}>Select a topic.</p>
-          ) : (
-            <div className="stack">
-              <div className="field">
-                <label>Topic name</label>
-                <input type="text" value={selectedTopic.name} onChange={e => updateTopic(selectedTopic.id, { name: e.target.value })} />
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <Button label="Add Subtopic" onClick={() => addSubtopic(selectedTopic.id)} />
-              </div>
-              {selectedTopic.subtopics.length === 0 ? (
-                <p style={{ margin: 0, fontSize: 14 }}>No subtopics yet.</p>
-              ) : (
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {selectedTopic.subtopics.map(sub => (
-                    <li key={sub.id}
-                        onClick={() => setSelectedSubId(sub.id)}
-                        style={{ padding: '8px', borderTop: '1px solid #f2f2f2', cursor: 'pointer', background: sub.id === selectedSubId ? '#f9f9f9' : 'transparent', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 14 }}>{sub.name || '(no name)'}</span>
-                      <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 8 }}>
-                        <Button label="Rename" onClick={() => setSelectedSubId(sub.id)} />
-                        <Button label="Remove" onClick={() => removeSubtopic(selectedTopic.id, sub.id)} />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Questions (right) */}
-        <div className="stack">
-          <h4 style={{ margin: 0, fontSize: 14, fontWeight: 400 }}>Key Questions</h4>
-          {!selectedTopic || !selectedSub ? (
-            <p style={{ margin: 0, fontSize: 14 }}>Select a subtopic.</p>
-          ) : (
-            <div className="stack">
-              <div className="field">
-                <label>Subtopic name</label>
-                <input type="text" value={selectedSub.name} onChange={e => updateSubtopic(selectedTopic.id, selectedSub.id, { name: e.target.value })} />
-              </div>
-              <div>
-                <Button label="Add Question" onClick={() => addQuestion(selectedTopic.id, selectedSub.id)} />
-              </div>
-              {selectedSub.keyQuestions.length === 0 ? (
-                <p style={{ margin: 0, fontSize: 14 }}>No questions yet.</p>
-              ) : (
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {selectedSub.keyQuestions.map((q, i) => (
-                    <li key={i} className="row" style={{ alignItems: 'flex-end', paddingTop: 8 }}>
-                      <div className="field" style={{ flex: 1 }}>
-                        <label>Question</label>
-                        <input type="text" value={q} onChange={e => updateQuestion(selectedTopic.id, selectedSub.id, i, e.target.value)} />
-                      </div>
-                      <div>
-                        <Button label="Remove" onClick={() => removeQuestion(selectedTopic.id, selectedSub.id, i)} />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <Button label="Cancel" onClick={onCancel} />
-        <Button label="Save" onClick={onSave} />
-      </div>
-    </div>
-  )
-}
 
 function TaskForm({ value, onChange, onCancel, onSave }: {
   value: { id: string, name: string, details: string }
