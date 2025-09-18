@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { apiGet, apiJson } from '../lib/api'
 
 export type Advisor = {
   id: string
@@ -21,33 +22,44 @@ type AdvisorsContextValue = {
 const AdvisorsContext = createContext<AdvisorsContextValue | null>(null)
 
 export function AdvisorsProvider({ children }: { children: React.ReactNode }) {
-  const [advisors, setAdvisors] = useState<Advisor[]>(() => {
-    try {
-      const raw = localStorage.getItem('advisors')
-      if (!raw) return []
-      const parsed = JSON.parse(raw) as Advisor[]
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  })
+  const [advisors, setAdvisors] = useState<Advisor[]>([])
 
-  // Persist to localStorage on every change
+  // Initial load from API
   useEffect(() => {
-    try {
-      localStorage.setItem('advisors', JSON.stringify(advisors))
-    } catch {}
-  }, [advisors])
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await apiGet<Advisor[]>('/api/advisors')
+        if (!cancelled) setAdvisors(Array.isArray(list) ? list : [])
+      } catch {
+        if (!cancelled) setAdvisors([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const value = useMemo<AdvisorsContextValue>(() => ({
     advisors,
     upsertAdvisor: (advisor: Advisor) => {
-      setAdvisors(prev => {
-        const exists = prev.some(a => a.id === advisor.id)
-        return exists ? prev.map(a => (a.id === advisor.id ? advisor : a)) : [...prev, advisor]
-      })
+      void (async () => {
+        try {
+          const hasId = Boolean(advisor?.id)
+          const saved = hasId
+            ? await apiJson<Advisor>(`/api/advisors/${advisor.id}`, 'PUT', advisor)
+            : await apiJson<Advisor>('/api/advisors', 'POST', advisor)
+          setAdvisors(prev => {
+            const exists = prev.some(a => a.id === saved.id)
+            return exists ? prev.map(a => (a.id === saved.id ? saved : a)) : [...prev, saved]
+          })
+        } catch {}
+      })()
     },
-    deleteAdvisor: (id: string) => setAdvisors(prev => prev.filter(a => a.id !== id)),
+    deleteAdvisor: (id: string) => {
+      void (async () => {
+        try { await apiJson<{ ok: boolean }>(`/api/advisors/${id}`, 'DELETE') } catch {}
+        setAdvisors(prev => prev.filter(a => a.id !== id))
+      })()
+    },
   }), [advisors])
 
   return <AdvisorsContext.Provider value={value}>{children}</AdvisorsContext.Provider>

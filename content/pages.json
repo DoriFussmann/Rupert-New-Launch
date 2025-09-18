@@ -1,0 +1,9 @@
+[
+  { "slug": "home",  "label": "Home" },
+  { "slug": "admin", "label": "Admin" },
+  { "slug": "advisors", "label": "Advisors" },
+  { "slug": "companies", "label": "Companies" },
+  { "slug": "tasks", "label": "Tasks" }
+]
+
+

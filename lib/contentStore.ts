@@ -2,7 +2,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 
-export const allowedCollections = ["advisors", "companies", "structures"] as const
+export const allowedCollections = ["advisors", "companies", "structures", "tasks", "users"] as const
 export type Collection = typeof allowedCollections[number]
 
 export function isAllowedCollection(input: string): input is Collection {

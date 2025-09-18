@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { apiGet, apiJson } from '../lib/api'
 
 export type Company = {
   id: string
@@ -16,32 +17,44 @@ type CompaniesContextValue = {
 const CompaniesContext = createContext<CompaniesContextValue | null>(null)
 
 export function CompaniesProvider({ children }: { children: React.ReactNode }) {
-  const [companies, setCompanies] = useState<Company[]>(() => {
-    try {
-      const raw = localStorage.getItem('companies')
-      if (!raw) return []
-      const parsed = JSON.parse(raw) as Company[]
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  })
+  const [companies, setCompanies] = useState<Company[]>([])
 
+  // Initial load from API
   useEffect(() => {
-    try {
-      localStorage.setItem('companies', JSON.stringify(companies))
-    } catch {}
-  }, [companies])
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await apiGet<Company[]>('/api/companies')
+        if (!cancelled) setCompanies(Array.isArray(list) ? list : [])
+      } catch {
+        if (!cancelled) setCompanies([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const value = useMemo<CompaniesContextValue>(() => ({
     companies,
     upsertCompany: (company: Company) => {
-      setCompanies(prev => {
-        const exists = prev.some(c => c.id === company.id)
-        return exists ? prev.map(c => (c.id === company.id ? company : c)) : [...prev, company]
-      })
+      void (async () => {
+        try {
+          const hasId = Boolean(company?.id)
+          const saved = hasId
+            ? await apiJson<Company>(`/api/companies/${company.id}`, 'PUT', company)
+            : await apiJson<Company>('/api/companies', 'POST', company)
+          setCompanies(prev => {
+            const exists = prev.some(c => c.id === saved.id)
+            return exists ? prev.map(c => (c.id === saved.id ? saved : c)) : [...prev, saved]
+          })
+        } catch {}
+      })()
     },
-    deleteCompany: (id: string) => setCompanies(prev => prev.filter(c => c.id !== id)),
+    deleteCompany: (id: string) => {
+      void (async () => {
+        try { await apiJson<{ ok: boolean }>(`/api/companies/${id}`, 'DELETE') } catch {}
+        setCompanies(prev => prev.filter(c => c.id !== id))
+      })()
+    },
   }), [companies])
 
   return <CompaniesContext.Provider value={value}>{children}</CompaniesContext.Provider>

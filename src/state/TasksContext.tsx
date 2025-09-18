@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { apiGet, apiJson } from '../lib/api'
 
 export type Task = {
   id: string
@@ -15,32 +16,44 @@ type TasksContextValue = {
 const TasksContext = createContext<TasksContextValue | null>(null)
 
 export function TasksProvider({ children }: { children: React.ReactNode }) {
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    try {
-      const raw = localStorage.getItem('tasks')
-      if (!raw) return []
-      const parsed = JSON.parse(raw) as Task[]
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  })
+  const [tasks, setTasks] = useState<Task[]>([])
 
+  // Initial load from API
   useEffect(() => {
-    try {
-      localStorage.setItem('tasks', JSON.stringify(tasks))
-    } catch {}
-  }, [tasks])
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await apiGet<Task[]>('/api/tasks')
+        if (!cancelled) setTasks(Array.isArray(list) ? list : [])
+      } catch {
+        if (!cancelled) setTasks([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const value = useMemo<TasksContextValue>(() => ({
     tasks,
     upsertTask: (task: Task) => {
-      setTasks(prev => {
-        const exists = prev.some(t => t.id === task.id)
-        return exists ? prev.map(t => (t.id === task.id ? task : t)) : [...prev, task]
-      })
+      void (async () => {
+        try {
+          const hasId = Boolean(task?.id)
+          const saved = hasId
+            ? await apiJson<Task>(`/api/tasks/${task.id}`, 'PUT', task)
+            : await apiJson<Task>('/api/tasks', 'POST', task)
+          setTasks(prev => {
+            const exists = prev.some(t => t.id === saved.id)
+            return exists ? prev.map(t => (t.id === saved.id ? saved : t)) : [...prev, saved]
+          })
+        } catch {}
+      })()
     },
-    deleteTask: (id: string) => setTasks(prev => prev.filter(t => t.id !== id)),
+    deleteTask: (id: string) => {
+      void (async () => {
+        try { await apiJson<{ ok: boolean }>(`/api/tasks/${id}`, 'DELETE') } catch {}
+        setTasks(prev => prev.filter(t => t.id !== id))
+      })()
+    },
   }), [tasks])
 
   return <TasksContext.Provider value={value}>{children}</TasksContext.Provider>
